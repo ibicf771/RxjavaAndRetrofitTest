@@ -12,6 +12,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+import javax.inject.Inject;
+
+import dagger.Component;
+import dagger.Module;
+import dagger.Provides;
 import io.reactivex.BackpressureStrategy;
 import io.reactivex.Flowable;
 import io.reactivex.FlowableEmitter;
@@ -20,7 +25,11 @@ import io.reactivex.Observable;
 import io.reactivex.ObservableEmitter;
 import io.reactivex.ObservableOnSubscribe;
 import io.reactivex.ObservableSource;
+import io.reactivex.Observer;
+import io.reactivex.Scheduler;
 import io.reactivex.android.schedulers.AndroidSchedulers;
+import io.reactivex.annotations.NonNull;
+import io.reactivex.disposables.Disposable;
 import io.reactivex.functions.BiFunction;
 import io.reactivex.functions.Consumer;
 import io.reactivex.functions.Function;
@@ -30,6 +39,7 @@ import retrofit2.Call;
 import retrofit2.Callback;
 import retrofit2.Response;
 import retrofit2.Retrofit;
+import retrofit2.adapter.rxjava2.RxJava2CallAdapterFactory;
 import retrofit2.converter.gson.GsonConverterFactory;
 import retrofit2.http.GET;
 import retrofit2.http.Path;
@@ -38,17 +48,21 @@ import retrofit2.http.Path;
 public class MainActivity extends AppCompatActivity {
     private static String TAG = "Rxjava";
 
-    private String str = null;
+    @Inject   //标明需要注入的对象
+    Person person;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-
         rxjavaFunc();
 
         requestUrl();
+
+        retrofitAndRxjava();
+
+        daggerTest();
     }
 
     //------------------------------------Retrofit------------------------------------------------//
@@ -258,4 +272,91 @@ public class MainActivity extends AppCompatActivity {
                     }
                 });
     }
+
+
+    //-----------------------------------dagger2-----------------------------------//
+
+    private void daggerTest(){
+        // 构造桥梁对象
+        MainComponent component = DaggerMainComponent.builder().mainModule(new MainModule()).build();
+
+        //注入
+        component.inject(this);
+    }
+
+    @Module   //提供依赖对象的实例
+    public class MainModule {
+
+        @Provides
+            // 关键字，标明该方法提供依赖对象
+        Person providerPerson(){
+            //提供Person对象
+            return new Person();
+        }
+    }
+
+    public class Person {
+
+        public Person(){
+            Log.i(TAG,"person create!!!");
+        }
+    }
+
+
+    //---------------------------------retrofit & rxjava-------------------------------------------//
+
+    private void retrofitAndRxjava() {
+
+        Log.d(TAG, "retrofitAndRxjava " );
+
+        Retrofit retrofit = new Retrofit.Builder()
+                .baseUrl("https://api.github.com")
+                .addConverterFactory(GsonConverterFactory.create())
+                .addCallAdapterFactory(RxJava2CallAdapterFactory.create())
+                .build();
+
+        GitHubObservable gitHubObservable = retrofit.create(GitHubObservable.class);
+        Observable<List<Contributor>> call = gitHubObservable.contributors("square", "retrofit");
+
+
+        call.subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(new Observer<List<Contributor>>() {
+                    @Override
+                    public void onSubscribe(@NonNull Disposable d) {
+                        Log.d(TAG, "retrofitAndRxjava onSubscribe");
+                    }
+
+                    @Override
+                    public void onNext(@NonNull List<Contributor> contributors) {
+                        Log.d(TAG, "retrofitAndRxjava onNext");
+                        if (contributors != null) {
+                            for (int i = 0; i < contributors.size(); i++) {
+                                Log.d(TAG, "retrofitAndRxjava " + contributors.get(i).toString());
+                            }
+                        }
+                    }
+
+                    @Override
+                    public void onError(@NonNull Throwable e) {
+
+                        Log.d(TAG, "retrofitAndRxjava onError " + e.toString());
+                    }
+
+                    @Override
+                    public void onComplete() {
+                        Log.d(TAG, "retrofitAndRxjava onComplete");
+                    }
+                });
+
+    }
+
+    public interface GitHubObservable {
+        @GET("/repos/{owner}/{repo}/contributors")
+        Observable<List<Contributor>> contributors(
+                @Path("owner") String owner,
+                @Path("repo") String repo);
+    }
+
+
 }
